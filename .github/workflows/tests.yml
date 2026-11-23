@@ -63,5 +63,5 @@ jobs:
             echo "Possible success! Sending notify."
             curl -s -X POST "https://sctapi.ftqq.com/${{ secrets.SENDKEY }}.send" \
               -d "title=🎉 OCI抢到了！快去看" \
-              -d "desp=GitHub Actions 日志里没再出现 Out of host capacity，疑似抢到 ARM 实例。立刻去 OCI 控制台确认，并回 GitHub 禁用 workflow。"
+              -d "desp=日志没再出现 Out of host capacity，疑似抢到 ARM 实例。立刻去 OCI 控制台确认，并回 GitHub 禁用 workflow 和 cron-job.org 任务。"
           fi
