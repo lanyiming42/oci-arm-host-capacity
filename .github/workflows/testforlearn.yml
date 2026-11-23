@@ -8,12 +8,13 @@ name: Tests          # 这条 workflow 显示的名字（左侧栏看到的 "Tes
 
 # ---------- on: 什么时候开工（触发器，可多个并存）----------
 on:
-  workflow_dispatch:           # 触发器①：手动。你在 Actions 页面点 "Run workflow" 时触发
-  repository_dispatch:         # 触发器②：外部。cron-job.org 每30分钟 POST 过来时触发
-    types: [oci-cron]          #   外部敲门用的"暗号"，必须和 cron-job 请求体里的
+  workflow_dispatch:           
+# 触发器①：手动。你在 Actions 页面点 "Run workflow" 时触发
+# repository_dispatch:         # 触发器②：外部。cron-job.org 每30分钟 POST 过来时触发
+#    types: [oci-cron]          #   外部敲门用的"暗号"，必须和 cron-job 请求体里的
                                │   {"event_type":"oci-cron"} 一字不差，否则不认
-  schedule:                    # 触发器③：定时兜底。即使 cron-job 偶尔漏了，GitHub 自己也跑
-    - cron: '*/20 * * * *'     #   cron 表达式：每隔20分钟一次（UTC时间，不准时，所以才需要 cron-job）
+#  schedule:                    # 触发器③：定时兜底。即使 cron-job 偶尔漏了，GitHub 自己也跑
+#  - cron: '*/20 * * * *'     #   cron 表达式：每隔20分钟一次（UTC时间，不准时，所以才需要 cron-job）
 
 # ---------- jobs: 开工后具体干哪些活 ----------
 jobs:
@@ -29,7 +30,6 @@ jobs:
                                │
       - name: Checkout         # 步骤①：搬代码
         uses: actions/checkout@v4        # uses=用别人写好的现成"积木"；这个积木把你的仓库代码下载到临时机器里
-
       - name: Setup PHP        # 步骤②：装 PHP 环境
         uses: shivammathur/setup-php@v2  # 用社区维护的装 PHP 积木
         with:                            # with=给这块积木传参数
