@@ -1,9 +1,10 @@
 name: Tests
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [oci-cron]
   schedule:
     - cron: '*/20 * * * *'
-
 jobs:
   integration-tests:
     runs-on: ubuntu-latest
