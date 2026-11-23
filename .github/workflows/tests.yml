@@ -33,14 +33,19 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
 
+      - name: Write private key
+        env:
+          KEY: ${{ secrets.OCI_PRIVATE_KEY_CONTENT }}
+        run: printf '%s\n' "$KEY" > "$GITHUB_WORKSPACE/oci.pem"
+
       - name: Run script
-        run: php index.php
+        run: php index.php 2>&1 | tee "$GITHUB_WORKSPACE/output.log"
         env:
           OCI_REGION: ${{ secrets.OCI_REGION }}
           OCI_USER_ID: ${{ secrets.OCI_USER_ID }}
           OCI_TENANCY_ID: ${{ secrets.OCI_TENANCY_ID }}
           OCI_KEY_FINGERPRINT: ${{ secrets.OCI_KEY_FINGERPRINT }}
-          OCI_PRIVATE_KEY_CONTENT: ${{ secrets.OCI_PRIVATE_KEY_CONTENT }}
+          OCI_PRIVATE_KEY_FILENAME: ${{ github.workspace }}/oci.pem
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
           OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
@@ -48,3 +53,15 @@ jobs:
           OCI_OCPUS: ${{ secrets.OCI_OCPUS }}
           OCI_MEMORY_IN_GBS: ${{ secrets.OCI_MEMORY_IN_GBS }}
           OCI_MAX_INSTANCES: ${{ secrets.OCI_MAX_INSTANCES }}
+
+      - name: Notify if grabbed
+        if: always()
+        run: |
+          if grep -q "Out of host capacity" "$GITHUB_WORKSPACE/output.log"; then
+            echo "Still no capacity, no notify."
+          else
+            echo "Possible success! Sending notify."
+            curl -s -X POST "https://sctapi.ftqq.com/${{ secrets.SENDKEY }}.send" \
+              -d "title=🎉 OCI抢到了！快去看" \
+              -d "desp=GitHub Actions 日志里没再出现 Out of host capacity，疑似抢到 ARM 实例。立刻去 OCI 控制台确认，并回 GitHub 禁用 workflow。"
+          fi
