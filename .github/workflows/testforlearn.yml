@@ -1,0 +1,92 @@
+# ============================================================
+# 这个文件 = 一条叫 "Tests" 的 workflow（自动化流水线）
+# 必须放在仓库的 .github/workflows/ 目录下，GitHub 才会认它
+# 文件名 tests.yml 无所谓叫什么，关键是放对文件夹
+# ============================================================
+
+name: Tests          # 这条 workflow 显示的名字（左侧栏看到的 "Tests" 就是它）
+
+# ---------- on: 什么时候开工（触发器，可多个并存）----------
+on:
+  workflow_dispatch:           # 触发器①：手动。你在 Actions 页面点 "Run workflow" 时触发
+  repository_dispatch:         # 触发器②：外部。cron-job.org 每30分钟 POST 过来时触发
+    types: [oci-cron]          #   外部敲门用的"暗号"，必须和 cron-job 请求体里的
+                               │   {"event_type":"oci-cron"} 一字不差，否则不认
+  schedule:                    # 触发器③：定时兜底。即使 cron-job 偶尔漏了，GitHub 自己也跑
+    - cron: '*/20 * * * *'     #   cron 表达式：每隔20分钟一次（UTC时间，不准时，所以才需要 cron-job）
+
+# ---------- jobs: 开工后具体干哪些活 ----------
+jobs:
+  integration-tests:           # 这是 job 的名字（一个大工序），可自己起
+    runs-on: ubuntu-latest     # 指定用哪种临时机器：GitHub 免费提供的最新版 Ubuntu
+
+    strategy:                  # 矩阵策略：让同一套步骤按不同参数跑多遍
+      matrix:
+        php: ['8.3']           #   这里只填了 8.3，即只用 PHP 8.3 跑一遍
+                               │   （想同时测 8.1/8.2/8.3 就往数组里加，会并行开多台机器）
+
+    steps:                     # steps：这个 job 里一步一步的动作，从上往下顺序执行
+                               │
+      - name: Checkout         # 步骤①：搬代码
+        uses: actions/checkout@v4        # uses=用别人写好的现成"积木"；这个积木把你的仓库代码下载到临时机器里
+
+      - name: Setup PHP        # 步骤②：装 PHP 环境
+        uses: shivammathur/setup-php@v2  # 用社区维护的装 PHP 积木
+        with:                            # with=给这块积木传参数
+          php-version: ${{ matrix.php }} #   装哪个版本？取上面 matrix 里的值（这里就是 8.3）
+                               │
+      - name: Get Composer Cache Directory   # 步骤③：查一下 Composer（PHP零件管理器）的缓存目录在哪
+        id: composer-cache                #   id=给这步起个名字，好让后面步骤引用它的输出
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+                               #   run=直接跑一段命令行；这句把缓存目录写进 GITHUB_OUTPUT 供下一步用
+                               │
+      - name: Cache dependencies  # 步骤④：缓存依赖，让下次跑得更快、少重复下载
+        uses: actions/cache@v4     #   用官方缓存积木
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}  #   要缓存哪个目录？（引用步骤③查到的路径）
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+                               #   缓存钥匙：系统+composer.lock内容的哈希；lock文件变了钥匙就变，自动重新缓存
+          restore-keys: ${{ runner.os }}-composer-       #   钥匙没精确命中时，用这个前缀找一份相近的旧缓存
+                               │
+      - name: Install dependencies          # 步骤⑤：安装脚本需要的零件库
+        run: composer install --prefer-dist --no-progress
+                               #   composer install=按 composer.lock 装依赖；--prefer-dist 下压缩包更快；--no-progress 不刷进度条更干净
+                               │
+      - name: Write private key  # 步骤⑥：把私钥 Secret 写成文件（关键！之前卡在这步）
+        env:                     #   env=给这一步注入环境变量
+          KEY: ${{ secrets.OCI_PRIVATE_KEY_CONTENT }}  #   把 GitHub 保险柜里的私钥内容，临时放进 KEY 这个变量
+        run: printf '%s\n' "$KEY" > "$GITHUB_WORKSPACE/oci.pem"
+                               #   把 KEY 的内容写成一个 oci.pem 文件；脚本要靠这个文件给请求签名
+                               │
+      - name: Run script         # 步骤⑦：真正抢机的那一步（核心中的核心）
+        run: php index.php 2>&1 | tee "$GITHUB_WORKSPACE/output.log"
+                               #   php index.php=运行抢机主脚本
+                               │   2>&1=把报错也併进正常输出；tee=一边显示一边存进 output.log（下一步通知要读它）
+        env:                     #   ↓ 下面把这些 Secret 变成脚本能读到的环境变量
+          OCI_REGION: ${{ secrets.OCI_REGION }}              # 区域，如 us-phoenix-1，决定请求发到哪个地域
+          OCI_USER_ID: ${{ secrets.OCI_USER_ID }}            # 你的用户 OCID，签名时声明"谁在申请"
+          OCI_TENANCY_ID: ${{ secrets.OCI_TENANCY_ID }}      # 租户 OCID
+          OCI_KEY_FINGERPRINT: ${{ secrets.OCI_KEY_FINGERPRINT }}  # API 密钥指纹，告诉 Oracle 用哪把公钥验你
+          OCI_PRIVATE_KEY_FILENAME: ${{ github.workspace }}/oci.pem # 私钥文件路径，指向步骤⑥生成的文件（名字必须叫 FILENAME，脚本只认它）
+          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}        # 新机器的网卡挂到哪个子网
+          OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}          # 装什么系统镜像
+          OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}  # 抢到后你能 SSH 登录的公钥
+          OCI_SHAPE: ${{ secrets.OCI_SHAPE }}                # 机器型号，VM.Standard.A1.Flex=ARM
+          OCI_OCPUS: ${{ secrets.OCI_OCPUS }}                # CPU 核数，免费 ARM 上限 4
+          OCI_MEMORY_IN_GBS: ${{ secrets.OCI_MEMORY_IN_GBS }} # 内存 GB，免费 ARM 上限 24
+          OCI_MAX_INSTANCES: ${{ secrets.OCI_MAX_INSTANCES }} # 已有几台就停手，防建一堆
+                               │
+      - name: Notify if grabbed # 步骤⑧：抢到了才发微信通知（收尾）
+        if: always()           #   if: always()=不管上一步成功还是失败，这步都执行（否则一旦脚本报错就发不出通知）
+        run: |
+          if grep -q "Out of host capacity" "$GITHUB_WORKSPACE/output.log"; then
+            echo "Still no capacity, no notify."
+                               #   日志里还能找到 "Out of host capacity" → 说明没抢到，安静，不打扰你
+          else
+            echo "Possible success! Sending notify."
+            curl -s -X POST "https://sctapi.ftqq.com/${{ secrets.SENDKEY }}.send" \
+                               #   日志里没有那句话 → 疑似抢到了，用 curl 调 Server酱接口
+              -d "title=🎉 OCI抢到了！快去看" \     #   通知标题
+              -d "desp=日志没再出现 Out of host capacity，疑似抢到 ARM 实例。立刻去 OCI 控制台确认，并回 GitHub 禁用 workflow 和 cron-job.org 任务。"
+                               #   通知正文，提醒你去收机器 + 三处停用
+          fi
